@@ -76,7 +76,6 @@
       const romInput = document.getElementById("romInput");
       const statusEl = document.getElementById("status");
 
-      let loaderAdded = false;
       let currentBlobUrl = null;
 
       function bootRom(file) {
@@ -88,72 +87,31 @@
         }
 
         currentBlobUrl = URL.createObjectURL(file);
-        statusEl.textContent = `Selected: ${file.name}`;
+        statusEl.textContent = `Booting: ${file.name}`;
 
         const gameEl = document.getElementById("game");
         gameEl.innerHTML = "";
 
         window.EJS_player = "#game";
         window.EJS_core = "gba";
-        window.EJS_pathtodata = "https://cdn.emulatorjs.org/stable/data/";
+        window.EJS_pathtodata = "/emulatorjs/data/";
         window.EJS_gameUrl = currentBlobUrl;
         window.EJS_threads = false;
         window.EJS_startOnLoaded = true;
 
-        if (!loaderAdded) {
-          const script = document.createElement("script");
-          script.src = "https://cdn.emulatorjs.org/stable/data/loader.js";
-          script.onload = () => {
-            statusEl.textContent = `Booting: ${file.name}`;
-          };
-          script.onerror = () => {
-            statusEl.textContent = "Failed to load EmulatorJS";
-          };
-          document.body.appendChild(script);
-          loaderAdded = true;
-        } else {
-          // Reload the iframe page to reinitialize cleanly with the selected ROM.
-          location.reload();
-        }
+        const oldLoader = document.getElementById("ejs-loader");
+        if (oldLoader) oldLoader.remove();
 
-        sessionStorage.setItem(
-          "emulatorjs_pending_rom",
-          JSON.stringify({
-            name: file.name,
-            url: currentBlobUrl
-          })
-        );
-      }
-
-      const pending = sessionStorage.getItem("emulatorjs_pending_rom");
-      if (pending) {
-        try {
-          const parsed = JSON.parse(pending);
-          if (parsed?.url) {
-            currentBlobUrl = parsed.url;
-            statusEl.textContent = `Booting: ${parsed.name}`;
-
-            window.EJS_player = "#game";
-            window.EJS_core = "gba";
-            window.EJS_pathtodata = "https://cdn.emulatorjs.org/stable/data/";
-            window.EJS_gameUrl = parsed.url;
-            window.EJS_threads = false;
-            window.EJS_startOnLoaded = true;
-
-            const script = document.createElement("script");
-            script.src = "https://cdn.emulatorjs.org/stable/data/loader.js";
-            script.onerror = () => {
-              statusEl.textContent = "Failed to load EmulatorJS";
-            };
-            document.body.appendChild(script);
-
-            sessionStorage.removeItem("emulatorjs_pending_rom");
-            loaderAdded = true;
-          }
-        } catch (e) {
-          console.error(e);
-          sessionStorage.removeItem("emulatorjs_pending_rom");
-        }
+        const script = document.createElement("script");
+        script.id = "ejs-loader";
+        script.src = "/emulatorjs/data/loader.js";
+        script.onload = () => {
+          statusEl.textContent = `Running: ${file.name}`;
+        };
+        script.onerror = () => {
+          statusEl.textContent = "Failed to load local EmulatorJS assets";
+        };
+        document.body.appendChild(script);
       }
 
       romInput.addEventListener("change", (e) => {
