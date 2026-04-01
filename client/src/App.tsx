@@ -116,6 +116,10 @@ export default function App() {
             {JSON.stringify(discordInfo, null, 2)}
           </pre>
           <div>
+            <strong>Location search:</strong>{" "}
+            {window.location.search || "(empty)"}
+          </div>
+          <div>
             <strong>Auth error:</strong> {discordInfo?.authError ?? "none"}
           </div>
           <div>

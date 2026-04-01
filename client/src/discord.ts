@@ -12,16 +12,12 @@ export type DiscordInfo = {
 
 let discordSdk: DiscordSDK | null = null;
 
-function hasDiscordFrameParams() {
-  const params = new URLSearchParams(window.location.search);
-  return params.has("frame_id");
-}
-
 export function getDiscordSdk() {
   const clientId = import.meta.env.VITE_DISCORD_CLIENT_ID as string | undefined;
 
-  if (!clientId) return null;
-  if (!hasDiscordFrameParams()) return null;
+  if (!clientId) {
+    return null;
+  }
 
   if (!discordSdk) {
     discordSdk = new DiscordSDK(clientId);
@@ -31,6 +27,35 @@ export function getDiscordSdk() {
 }
 
 export async function setupDiscordSdk(): Promise<DiscordInfo> {
+  const clientId = import.meta.env.VITE_DISCORD_CLIENT_ID as string | undefined;
+  const tokenExchangeUrl = import.meta.env.VITE_DISCORD_TOKEN_EXCHANGE_URL as
+    | string
+    | undefined;
+
+  if (!clientId) {
+    return {
+      userId: null,
+      channelId: null,
+      guildId: null,
+      instanceId: null,
+      platform: null,
+      sdkAvailable: false,
+      authError: "Missing VITE_DISCORD_CLIENT_ID",
+    };
+  }
+
+  if (!tokenExchangeUrl) {
+    return {
+      userId: null,
+      channelId: null,
+      guildId: null,
+      instanceId: null,
+      platform: null,
+      sdkAvailable: false,
+      authError: "Missing VITE_DISCORD_TOKEN_EXCHANGE_URL",
+    };
+  }
+
   const sdk = getDiscordSdk();
 
   if (!sdk) {
@@ -41,7 +66,7 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
       instanceId: null,
       platform: null,
       sdkAvailable: false,
-      authError: "SDK unavailable: missing client id or frame_id",
+      authError: "Failed to create Discord SDK",
     };
   }
 
@@ -53,18 +78,18 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
   };
 
   try {
+    console.log("[discord] location.search", window.location.search);
+    console.log("[discord] client id present", !!clientId);
+    console.log("[discord] token exchange url", tokenExchangeUrl);
+
     await sdk.ready();
 
-    const clientId = import.meta.env.VITE_DISCORD_CLIENT_ID as
-      | string
-      | undefined;
-    const tokenExchangeUrl = import.meta.env.VITE_DISCORD_TOKEN_EXCHANGE_URL as
-      | string
-      | undefined;
-
-    if (!clientId) throw new Error("Missing VITE_DISCORD_CLIENT_ID");
-    if (!tokenExchangeUrl)
-      throw new Error("Missing VITE_DISCORD_TOKEN_EXCHANGE_URL");
+    console.log("[discord] ready()", {
+      channelId: sdk.channelId,
+      guildId: sdk.guildId,
+      instanceId: sdk.instanceId,
+      platform: sdk.platform,
+    });
 
     const authz = await sdk.commands.authorize({
       client_id: clientId,
@@ -73,6 +98,8 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
       prompt: "none",
       state: crypto.randomUUID(),
     });
+
+    console.log("[discord] authorize() ok", authz);
 
     const tokenRes = await fetch(tokenExchangeUrl, {
       method: "POST",
@@ -83,6 +110,7 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
     });
 
     const tokenText = await tokenRes.text();
+    console.log("[discord] token exchange status", tokenRes.status, tokenText);
 
     if (!tokenRes.ok) {
       throw new Error(`Token exchange failed: ${tokenRes.status} ${tokenText}`);
@@ -99,13 +127,20 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
       access_token: accessToken,
     });
 
+    console.log("[discord] authenticate() result", auth);
+
     return {
       userId: auth?.user?.id ?? null,
-      ...baseInfo,
+      channelId: sdk.channelId ?? null,
+      guildId: sdk.guildId ?? null,
+      instanceId: sdk.instanceId ?? null,
+      platform: sdk.platform ?? null,
       sdkAvailable: true,
       authError: null,
     };
   } catch (err) {
+    console.error("[discord] auth flow failed", err);
+
     return {
       userId: null,
       ...baseInfo,
