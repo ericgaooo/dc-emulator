@@ -102,6 +102,22 @@ export default function App() {
           <div>
             <strong>Status:</strong> {status}
           </div>
+          <pre
+            style={{
+              marginTop: 12,
+              padding: 12,
+              borderRadius: 8,
+              background: "#0d0f14",
+              color: "#9fe870",
+              overflowX: "auto",
+              fontSize: 12,
+            }}
+          >
+            {JSON.stringify(discordInfo, null, 2)}
+          </pre>
+          <div>
+            <strong>Auth error:</strong> {discordInfo?.authError ?? "none"}
+          </div>
           <div>
             <strong>SDK available:</strong>{" "}
             {discordInfo?.sdkAvailable ? "yes" : "no"}

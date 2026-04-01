@@ -7,6 +7,7 @@ export type DiscordInfo = {
   instanceId: string | null;
   platform: string | null;
   sdkAvailable: boolean;
+  authError: string | null;
 };
 
 let discordSdk: DiscordSDK | null = null;
@@ -33,7 +34,6 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
   const sdk = getDiscordSdk();
 
   if (!sdk) {
-    console.log("[discord] SDK unavailable: missing client id or frame_id");
     return {
       userId: null,
       channelId: null,
@@ -41,6 +41,7 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
       instanceId: null,
       platform: null,
       sdkAvailable: false,
+      authError: "SDK unavailable: missing client id or frame_id",
     };
   }
 
@@ -53,15 +54,17 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
 
   try {
     await sdk.ready();
-    console.log("[discord] ready()", baseInfo);
 
-    const clientId = import.meta.env.VITE_DISCORD_CLIENT_ID as string | undefined;
+    const clientId = import.meta.env.VITE_DISCORD_CLIENT_ID as
+      | string
+      | undefined;
     const tokenExchangeUrl = import.meta.env.VITE_DISCORD_TOKEN_EXCHANGE_URL as
       | string
       | undefined;
 
     if (!clientId) throw new Error("Missing VITE_DISCORD_CLIENT_ID");
-    if (!tokenExchangeUrl) throw new Error("Missing VITE_DISCORD_TOKEN_EXCHANGE_URL");
+    if (!tokenExchangeUrl)
+      throw new Error("Missing VITE_DISCORD_TOKEN_EXCHANGE_URL");
 
     const authz = await sdk.commands.authorize({
       client_id: clientId,
@@ -71,20 +74,15 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
       state: crypto.randomUUID(),
     });
 
-    console.log("[discord] authorize() ok");
-
     const tokenRes = await fetch(tokenExchangeUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        code: authz.code,
-      }),
+      body: JSON.stringify({ code: authz.code }),
     });
 
     const tokenText = await tokenRes.text();
-    console.log("[discord] token exchange status", tokenRes.status, tokenText);
 
     if (!tokenRes.ok) {
       throw new Error(`Token exchange failed: ${tokenRes.status} ${tokenText}`);
@@ -101,19 +99,18 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
       access_token: accessToken,
     });
 
-    console.log("[discord] authenticate() result", auth);
-
     return {
       userId: auth?.user?.id ?? null,
       ...baseInfo,
       sdkAvailable: true,
+      authError: null,
     };
   } catch (err) {
-    console.error("[discord] auth flow failed", err);
     return {
       userId: null,
       ...baseInfo,
       sdkAvailable: true,
+      authError: err instanceof Error ? err.message : String(err),
     };
   }
 }
