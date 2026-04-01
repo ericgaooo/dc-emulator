@@ -111,6 +111,7 @@
       window.addEventListener("message", (event) => {
         if (event.origin !== window.location.origin) return;
         const msg = event.data;
+        console.log("Received DISCORD_CONTEXT", msg);
         if (!msg || msg.type !== "DISCORD_CONTEXT") return;
 
         appState.discordUserId = msg.payload?.userId ?? null;

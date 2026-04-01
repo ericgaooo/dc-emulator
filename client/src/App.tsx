@@ -49,11 +49,7 @@ export default function App() {
     const payload: IframeContextMessage = {
       type: "DISCORD_CONTEXT",
       payload: {
-        userId:
-          // your DiscordInfo type should include this
-          // if it doesn't yet, add it in setupDiscordSdk()
-          (discordInfo as DiscordInfo & { userId?: string | null })?.userId ??
-          null,
+        userId: discordInfo?.userId ?? null,
         guildId: discordInfo?.guildId ?? null,
         channelId: discordInfo?.channelId ?? null,
         instanceId: discordInfo?.instanceId ?? null,
@@ -62,7 +58,12 @@ export default function App() {
       },
     };
 
-    iframeRef.current.contentWindow?.postMessage(payload, window.location.origin);
+    console.log("Posting Discord context to iframe", payload);
+
+    iframeRef.current.contentWindow?.postMessage(
+      payload,
+      window.location.origin
+    );
   }, [iframeReady, discordInfo]);
 
   return (
@@ -104,9 +105,7 @@ export default function App() {
             {discordInfo?.sdkAvailable ? "yes" : "no"}
           </div>
           <div>
-            <strong>User:</strong>{" "}
-            {(discordInfo as DiscordInfo & { userId?: string | null })?.userId ??
-              "n/a"}
+            <strong>User:</strong> {discordInfo?.userId ?? "n/a"}
           </div>
           <div>
             <strong>Guild:</strong> {discordInfo?.guildId ?? "n/a"}
@@ -122,7 +121,8 @@ export default function App() {
           </div>
 
           <p style={{ marginTop: 12, marginBottom: 0, color: "#c9ced6" }}>
-            The emulator UI below is served from <code>/emulatorjs/index.html</code>.
+            The emulator UI below is served from{" "}
+            <code>/emulatorjs/index.html</code>.
           </p>
         </div>
 

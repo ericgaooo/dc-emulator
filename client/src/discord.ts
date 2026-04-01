@@ -1,6 +1,7 @@
 import { DiscordSDK } from "@discord/embedded-app-sdk";
 
 export type DiscordInfo = {
+  userId: string | null;
   channelId: string | null;
   guildId: string | null;
   instanceId: string | null;
@@ -33,6 +34,7 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
 
   if (!sdk) {
     return {
+      userId: null,
       channelId: null,
       guildId: null,
       instanceId: null,
@@ -44,7 +46,55 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
   try {
     await sdk.ready();
 
+    const clientId = import.meta.env.VITE_DISCORD_CLIENT_ID as string | undefined;
+    const tokenExchangeUrl = import.meta.env.VITE_DISCORD_TOKEN_EXCHANGE_URL as
+      | string
+      | undefined;
+
+    if (!clientId) {
+      throw new Error("Missing VITE_DISCORD_CLIENT_ID");
+    }
+
+    if (!tokenExchangeUrl) {
+      throw new Error("Missing VITE_DISCORD_TOKEN_EXCHANGE_URL");
+    }
+
+    const { code } = await sdk.commands.authorize({
+      client_id: clientId,
+      response_type: "code",
+      state: "",
+      prompt: "none",
+      scope: ["identify"],
+    });
+
+    const tokenRes = await fetch(tokenExchangeUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ code }),
+    });
+
+    if (!tokenRes.ok) {
+      const text = await tokenRes.text();
+      throw new Error(`Token exchange failed: ${tokenRes.status} ${text}`);
+    }
+
+    const tokenJson = await tokenRes.json();
+    const accessToken = tokenJson.access_token;
+
+    if (!accessToken) {
+      throw new Error("Token exchange response missing access_token");
+    }
+
+    const auth = await sdk.commands.authenticate({
+      access_token: accessToken,
+    });
+
+    const userId = auth?.user?.id ?? null;
+
     return {
+      userId,
       channelId: sdk.channelId ?? null,
       guildId: sdk.guildId ?? null,
       instanceId: sdk.instanceId ?? null,
@@ -52,8 +102,9 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
       sdkAvailable: true,
     };
   } catch (err) {
-    console.error("Discord SDK ready() failed:", err);
+    console.error("Discord SDK auth failed:", err);
     return {
+      userId: null,
       channelId: null,
       guildId: null,
       instanceId: null,
