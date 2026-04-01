@@ -28,7 +28,9 @@ export default function App() {
         setDiscordInfo(info);
         setStatus(
           info.sdkAvailable
-            ? "Discord Activity ready"
+            ? info.userId
+              ? "Discord Activity ready"
+              : "Discord SDK ready, user auth not resolved"
             : "Running in browser preview mode"
         );
       })
