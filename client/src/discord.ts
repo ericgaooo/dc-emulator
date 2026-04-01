@@ -59,18 +59,13 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
     const tokenExchangeUrl = import.meta.env.VITE_DISCORD_TOKEN_EXCHANGE_URL as
       | string
       | undefined;
-    const redirectUri = import.meta.env.VITE_DISCORD_REDIRECT_URI as
-      | string
-      | undefined;
 
     if (!clientId) throw new Error("Missing VITE_DISCORD_CLIENT_ID");
     if (!tokenExchangeUrl) throw new Error("Missing VITE_DISCORD_TOKEN_EXCHANGE_URL");
-    if (!redirectUri) throw new Error("Missing VITE_DISCORD_REDIRECT_URI");
 
     const authz = await sdk.commands.authorize({
       client_id: clientId,
       response_type: "code",
-      redirect_uri: redirectUri,
       scope: ["identify"],
       prompt: "none",
       state: crypto.randomUUID(),
@@ -89,7 +84,7 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
     });
 
     const tokenText = await tokenRes.text();
-    console.log("[discord] token exchange status", tokenRes.status);
+    console.log("[discord] token exchange status", tokenRes.status, tokenText);
 
     if (!tokenRes.ok) {
       throw new Error(`Token exchange failed: ${tokenRes.status} ${tokenText}`);
