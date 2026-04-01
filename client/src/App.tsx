@@ -1,10 +1,23 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { setupDiscordSdk, type DiscordInfo } from "./discord";
+
+type IframeContextMessage = {
+  type: "DISCORD_CONTEXT";
+  payload: {
+    userId: string | null;
+    guildId: string | null;
+    channelId: string | null;
+    instanceId: string | null;
+    platform: string | null;
+    sdkAvailable: boolean;
+  };
+};
 
 export default function App() {
   const [discordInfo, setDiscordInfo] = useState<DiscordInfo | null>(null);
   const [status, setStatus] = useState("Initializing...");
   const [iframeReady, setIframeReady] = useState(false);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -29,6 +42,28 @@ export default function App() {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!iframeReady || !iframeRef.current) return;
+
+    const payload: IframeContextMessage = {
+      type: "DISCORD_CONTEXT",
+      payload: {
+        userId:
+          // your DiscordInfo type should include this
+          // if it doesn't yet, add it in setupDiscordSdk()
+          (discordInfo as DiscordInfo & { userId?: string | null })?.userId ??
+          null,
+        guildId: discordInfo?.guildId ?? null,
+        channelId: discordInfo?.channelId ?? null,
+        instanceId: discordInfo?.instanceId ?? null,
+        platform: discordInfo?.platform ?? null,
+        sdkAvailable: discordInfo?.sdkAvailable ?? false,
+      },
+    };
+
+    iframeRef.current.contentWindow?.postMessage(payload, window.location.origin);
+  }, [iframeReady, discordInfo]);
 
   return (
     <div
@@ -69,6 +104,11 @@ export default function App() {
             {discordInfo?.sdkAvailable ? "yes" : "no"}
           </div>
           <div>
+            <strong>User:</strong>{" "}
+            {(discordInfo as DiscordInfo & { userId?: string | null })?.userId ??
+              "n/a"}
+          </div>
+          <div>
             <strong>Guild:</strong> {discordInfo?.guildId ?? "n/a"}
           </div>
           <div>
@@ -82,8 +122,7 @@ export default function App() {
           </div>
 
           <p style={{ marginTop: 12, marginBottom: 0, color: "#c9ced6" }}>
-            The emulator UI below is served from{" "}
-            <code>/emulatorjs/index.html</code>.
+            The emulator UI below is served from <code>/emulatorjs/index.html</code>.
           </p>
         </div>
 
@@ -114,6 +153,7 @@ export default function App() {
           )}
 
           <iframe
+            ref={iframeRef}
             title="GBA Emulator Frontend"
             src="/emulatorjs/index.html"
             onLoad={() => setIframeReady(true)}
