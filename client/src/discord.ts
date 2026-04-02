@@ -43,6 +43,9 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
   const tokenExchangeUrl = import.meta.env.VITE_DISCORD_TOKEN_EXCHANGE_URL as
     | string
     | undefined;
+  const redirectUri = import.meta.env.VITE_DISCORD_REDIRECT_URI as
+    | string
+    | undefined;
 
   if (!clientId) {
     return {
@@ -65,6 +68,18 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
       platform: null,
       sdkAvailable: false,
       authError: "Missing VITE_DISCORD_TOKEN_EXCHANGE_URL",
+    };
+  }
+
+  if (!redirectUri) {
+    return {
+      userId: null,
+      channelId: null,
+      guildId: null,
+      instanceId: null,
+      platform: null,
+      sdkAvailable: false,
+      authError: "Missing VITE_DISCORD_REDIRECT_URI",
     };
   }
 
@@ -92,6 +107,7 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
   try {
     console.log("[discord] location.search", window.location.search);
     console.log("[discord] token exchange url", tokenExchangeUrl);
+    console.log("[discord] redirect uri", redirectUri);
 
     await sdk.ready();
 
@@ -108,7 +124,8 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
       scope: ["identify"],
       prompt: "none",
       state: crypto.randomUUID(),
-    });
+      redirect_uri: redirectUri,
+    } as any);
 
     console.log("[discord] authorize() ok", authz);
 
