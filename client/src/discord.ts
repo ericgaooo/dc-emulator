@@ -43,9 +43,6 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
   const tokenExchangeUrl = import.meta.env.VITE_DISCORD_TOKEN_EXCHANGE_URL as
     | string
     | undefined;
-  const redirectUri = import.meta.env.VITE_DISCORD_REDIRECT_URI as
-    | string
-    | undefined;
 
   if (!clientId) {
     return {
@@ -71,18 +68,6 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
     };
   }
 
-  if (!redirectUri) {
-    return {
-      userId: null,
-      channelId: null,
-      guildId: null,
-      instanceId: null,
-      platform: null,
-      sdkAvailable: false,
-      authError: "Missing VITE_DISCORD_REDIRECT_URI",
-    };
-  }
-
   const sdk = getDiscordSdk();
 
   if (!sdk) {
@@ -105,18 +90,7 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
   };
 
   try {
-    console.log("[discord] location.search", window.location.search);
-    console.log("[discord] token exchange url", tokenExchangeUrl);
-    console.log("[discord] redirect uri", redirectUri);
-
     await sdk.ready();
-
-    console.log("[discord] ready()", {
-      channelId: sdk.channelId,
-      guildId: sdk.guildId,
-      instanceId: sdk.instanceId,
-      platform: sdk.platform,
-    });
 
     const authz = await sdk.commands.authorize({
       client_id: clientId,
@@ -124,10 +98,7 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
       scope: ["identify"],
       prompt: "none",
       state: crypto.randomUUID(),
-      redirect_uri: redirectUri,
-    } as any);
-
-    console.log("[discord] authorize() ok", authz);
+    });
 
     const tokenRes = await fetch(tokenExchangeUrl, {
       method: "POST",
@@ -138,7 +109,6 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
     });
 
     const tokenText = await tokenRes.text();
-    console.log("[discord] token exchange raw", tokenRes.status, tokenText);
 
     if (!tokenRes.ok) {
       throw new Error(`Token exchange failed: ${tokenRes.status} ${tokenText}`);
@@ -155,8 +125,6 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
       access_token: accessToken,
     });
 
-    console.log("[discord] authenticate() result", auth);
-
     return {
       userId: auth?.user?.id ?? null,
       channelId: sdk.channelId ?? null,
@@ -167,14 +135,11 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
       authError: null,
     };
   } catch (err) {
-    const pretty = stringifyUnknownError(err);
-    console.error("[discord] auth flow failed", err);
-
     return {
       userId: null,
       ...baseInfo,
       sdkAvailable: true,
-      authError: pretty,
+      authError: stringifyUnknownError(err),
     };
   }
 }
