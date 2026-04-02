@@ -194,9 +194,31 @@
         window.EJS_onGameStart = undefined;
         window.EJS_loadSaveFiles = undefined;
         window.EJS_gameUrl = undefined;
+        window.EJS_gameID = undefined;
       }
 
-      function scheduleBatteryUpload(saveData) {
+      async function extractArrayBufferFromUnknown(value) {
+        if (!value) return null;
+
+        if (value instanceof ArrayBuffer) {
+          return value;
+        }
+
+        if (value instanceof Blob) {
+          return await value.arrayBuffer();
+        }
+
+        if (ArrayBuffer.isView(value) && value.buffer instanceof ArrayBuffer) {
+          return value.buffer.slice(
+            value.byteOffset || 0,
+            (value.byteOffset || 0) + value.byteLength
+          );
+        }
+
+        return null;
+      }
+
+      function scheduleBatteryUpload(saveEvent) {
         if (!appState.discordUserId || !appState.romHash || !appState.romName) {
           console.warn("Skipping battery upload: missing user or ROM identity");
           return;
@@ -208,19 +230,19 @@
 
         appState.pendingBatteryUploadTimer = setTimeout(async () => {
           try {
-            let arrayBuffer;
+            console.log("Raw EmulatorJS save event", saveEvent);
 
-            if (saveData instanceof ArrayBuffer) {
-              arrayBuffer = saveData;
-            } else if (saveData?.buffer instanceof ArrayBuffer) {
-              arrayBuffer = saveData.buffer.slice(
-                saveData.byteOffset || 0,
-                (saveData.byteOffset || 0) + saveData.byteLength
+            // EmulatorJS commonly passes an object like:
+            // { hash, save, screenshot, format }
+            const savePayload = saveEvent?.save ?? saveEvent;
+
+            const arrayBuffer = await extractArrayBufferFromUnknown(savePayload);
+
+            if (!arrayBuffer) {
+              console.warn(
+                "Could not extract save buffer from EmulatorJS event",
+                saveEvent
               );
-            } else if (saveData instanceof Blob) {
-              arrayBuffer = await saveData.arrayBuffer();
-            } else {
-              console.warn("Unknown saveData shape from EmulatorJS:", saveData);
               return;
             }
 
@@ -235,7 +257,7 @@
 
             statusEl.textContent = `Running: ${appState.romName} (battery synced)`;
           } catch (err) {
-            console.error(err);
+            console.error("Battery sync failed", err);
             statusEl.textContent = `Running: ${appState.romName} (save sync failed)`;
           }
         }, 2000);
@@ -291,6 +313,7 @@
         window.EJS_core = "gba";
         window.EJS_pathtodata = "/emulatorjs/data/";
         window.EJS_gameUrl = appState.currentBlobUrl;
+        window.EJS_gameID = romHash;
         window.EJS_threads = false;
         window.EJS_startOnLoaded = true;
         window.EJS_fixedSaveInterval = 20;
@@ -304,9 +327,9 @@
           statusEl.textContent = `Running: ${file.name}`;
         };
 
-        window.EJS_onSaveUpdate = function (saveData) {
-          console.log("EJS_onSaveUpdate fired");
-          scheduleBatteryUpload(saveData);
+        window.EJS_onSaveUpdate = function (saveEvent) {
+          console.log("EJS_onSaveUpdate fired", saveEvent);
+          scheduleBatteryUpload(saveEvent);
         };
 
         const script = document.createElement("script");
