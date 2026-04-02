@@ -46,6 +46,13 @@ app.post("/api/token", async (req, res) => {
   try {
     const { code } = req.body ?? {};
 
+    console.log("[token] request received", {
+      hasCode: !!code,
+      redirectUri: DISCORD_REDIRECT_URI,
+      clientIdPresent: !!DISCORD_CLIENT_ID,
+      clientSecretPresent: !!DISCORD_CLIENT_SECRET,
+    });
+
     if (!code) {
       return res.status(400).json({ error: "Missing code" });
     }
@@ -72,7 +79,15 @@ app.post("/api/token", async (req, res) => {
       body: params,
     });
 
-    const data = await response.json();
+    const text = await response.text();
+    console.log("[token] discord oauth response", response.status, text);
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { raw: text };
+    }
 
     if (!response.ok) {
       console.error("Discord token exchange failed:", data);
@@ -83,7 +98,7 @@ app.post("/api/token", async (req, res) => {
       access_token: data.access_token,
     });
   } catch (err) {
-    console.error(err);
+    console.error("[token] exchange route crashed", err);
     res.status(500).json({ error: "Token exchange failed" });
   }
 });

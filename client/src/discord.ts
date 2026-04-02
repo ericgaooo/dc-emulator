@@ -12,6 +12,18 @@ export type DiscordInfo = {
 
 let discordSdk: DiscordSDK | null = null;
 
+function stringifyUnknownError(err: unknown): string {
+  if (err instanceof Error) {
+    return `${err.name}: ${err.message}`;
+  }
+
+  try {
+    return JSON.stringify(err, null, 2);
+  } catch {
+    return String(err);
+  }
+}
+
 export function getDiscordSdk() {
   const clientId = import.meta.env.VITE_DISCORD_CLIENT_ID as string | undefined;
 
@@ -79,7 +91,6 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
 
   try {
     console.log("[discord] location.search", window.location.search);
-    console.log("[discord] client id present", !!clientId);
     console.log("[discord] token exchange url", tokenExchangeUrl);
 
     await sdk.ready();
@@ -110,7 +121,7 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
     });
 
     const tokenText = await tokenRes.text();
-    console.log("[discord] token exchange status", tokenRes.status, tokenText);
+    console.log("[discord] token exchange raw", tokenRes.status, tokenText);
 
     if (!tokenRes.ok) {
       throw new Error(`Token exchange failed: ${tokenRes.status} ${tokenText}`);
@@ -120,7 +131,7 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
     const accessToken = tokenJson.access_token;
 
     if (!accessToken) {
-      throw new Error("Token exchange response missing access_token");
+      throw new Error(`Token exchange response missing access_token: ${tokenText}`);
     }
 
     const auth = await sdk.commands.authenticate({
@@ -139,13 +150,14 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
       authError: null,
     };
   } catch (err) {
+    const pretty = stringifyUnknownError(err);
     console.error("[discord] auth flow failed", err);
 
     return {
       userId: null,
       ...baseInfo,
       sdkAvailable: true,
-      authError: err instanceof Error ? err.message : String(err),
+      authError: pretty,
     };
   }
 }
