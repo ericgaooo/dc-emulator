@@ -1,4 +1,4 @@
-import { DiscordSDK } from "@discord/embedded-app-sdk";
+import { DiscordSDK, patchUrlMappings } from "@discord/embedded-app-sdk";
 
 export type DiscordInfo = {
   userId: string | null;
@@ -11,12 +11,10 @@ export type DiscordInfo = {
 };
 
 let discordSdk: DiscordSDK | null = null;
+let mappingsPatched = false;
 
 function stringifyUnknownError(err: unknown): string {
-  if (err instanceof Error) {
-    return `${err.name}: ${err.message}`;
-  }
-
+  if (err instanceof Error) return `${err.name}: ${err.message}`;
   try {
     return JSON.stringify(err, null, 2);
   } catch {
@@ -26,10 +24,7 @@ function stringifyUnknownError(err: unknown): string {
 
 export function getDiscordSdk() {
   const clientId = import.meta.env.VITE_DISCORD_CLIENT_ID as string | undefined;
-
-  if (!clientId) {
-    return null;
-  }
+  if (!clientId) return null;
 
   if (!discordSdk) {
     discordSdk = new DiscordSDK(clientId);
@@ -38,11 +33,24 @@ export function getDiscordSdk() {
   return discordSdk;
 }
 
+function patchNetworkingOnce() {
+  if (mappingsPatched) return;
+
+  patchUrlMappings([
+    {
+      prefix: "/backend",
+      target: "dc-emulator-backend-production-6543.up.railway.app",
+    },
+  ]);
+
+  mappingsPatched = true;
+}
+
 export async function setupDiscordSdk(): Promise<DiscordInfo> {
   const clientId = import.meta.env.VITE_DISCORD_CLIENT_ID as string | undefined;
-  const tokenExchangeUrl = import.meta.env.VITE_DISCORD_TOKEN_EXCHANGE_URL as
-    | string
-    | undefined;
+  const tokenExchangeUrl =
+    (import.meta.env.VITE_DISCORD_TOKEN_EXCHANGE_URL as string | undefined) ??
+    "/backend/api/token";
 
   if (!clientId) {
     return {
@@ -56,17 +64,7 @@ export async function setupDiscordSdk(): Promise<DiscordInfo> {
     };
   }
 
-  if (!tokenExchangeUrl) {
-    return {
-      userId: null,
-      channelId: null,
-      guildId: null,
-      instanceId: null,
-      platform: null,
-      sdkAvailable: false,
-      authError: "Missing VITE_DISCORD_TOKEN_EXCHANGE_URL",
-    };
-  }
+  patchNetworkingOnce();
 
   const sdk = getDiscordSdk();
 
