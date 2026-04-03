@@ -99,6 +99,10 @@
         emulatorBooted: false,
       };
 
+      function log(label, data) {
+        console.log(`[emu] ${label}`, data ?? "");
+      }
+
       window.addEventListener("message", (event) => {
         if (event.origin !== window.location.origin) return;
 
@@ -106,7 +110,7 @@
         if (!msg || typeof msg !== "object") return;
         if (msg.type !== "DISCORD_CONTEXT") return;
 
-        console.log("Received real DISCORD_CONTEXT", msg);
+        log("Received DISCORD_CONTEXT", msg);
 
         appState.discordUserId = msg.payload?.userId ?? null;
         appState.guildId = msg.payload?.guildId ?? null;
@@ -133,20 +137,39 @@
         url.searchParams.set("saveType", "battery");
         url.searchParams.set("slot", "0");
 
+        log("Calling fetchLatestBatterySave", {
+          url: url.toString(),
+          userId,
+          romHash,
+        });
+
         const res = await fetch(url.toString(), {
           headers: {
             "x-api-key": SAVE_API_KEY,
           },
         });
 
+        const text = await res.text();
+        log("fetchLatestBatterySave response", {
+          status: res.status,
+          body: text,
+        });
+
         if (!res.ok) {
-          throw new Error(`Save lookup failed: ${res.status}`);
+          throw new Error(`Save lookup failed: ${res.status} ${text}`);
         }
 
-        return res.json();
+        return JSON.parse(text);
       }
 
       async function uploadBatterySave({ userId, romHash, romName, arrayBuffer }) {
+        log("Uploading battery save", {
+          userId,
+          romHash,
+          romName,
+          bytes: arrayBuffer.byteLength,
+        });
+
         const bytes = new Uint8Array(arrayBuffer);
         let binary = "";
         for (let i = 0; i < bytes.length; i++) {
@@ -174,12 +197,17 @@
           }),
         });
 
+        const text = await res.text();
+        log("uploadBatterySave response", {
+          status: res.status,
+          body: text,
+        });
+
         if (!res.ok) {
-          const text = await res.text();
           throw new Error(`Battery upload failed: ${res.status} ${text}`);
         }
 
-        return res.json();
+        return JSON.parse(text);
       }
 
       function destroyExistingEmulatorArtifacts() {
@@ -219,7 +247,11 @@
 
       function scheduleBatteryUpload(saveEvent) {
         if (!appState.discordUserId || !appState.romHash || !appState.romName) {
-          console.warn("Skipping battery upload: missing user or ROM identity");
+          console.warn("[emu] Skipping battery upload: missing user or ROM identity", {
+            discordUserId: appState.discordUserId,
+            romHash: appState.romHash,
+            romName: appState.romName,
+          });
           return;
         }
 
@@ -229,13 +261,13 @@
 
         appState.pendingBatteryUploadTimer = setTimeout(async () => {
           try {
-            console.log("Raw EmulatorJS save event", saveEvent);
+            log("Raw EmulatorJS save event", saveEvent);
 
             const savePayload = saveEvent?.save ?? saveEvent;
             const arrayBuffer = await extractArrayBufferFromUnknown(savePayload);
 
             if (!arrayBuffer) {
-              console.warn("Could not extract save buffer from EmulatorJS event", saveEvent);
+              console.warn("[emu] Could not extract save buffer from EmulatorJS event", saveEvent);
               return;
             }
 
@@ -250,7 +282,7 @@
 
             statusEl.textContent = `Running: ${appState.romName} (battery synced)`;
           } catch (err) {
-            console.error("Battery sync failed", err);
+            console.error("[emu] Battery sync failed", err);
             statusEl.textContent = `Running: ${appState.romName} (save sync failed)`;
           }
         }, 2000);
@@ -269,6 +301,12 @@
         const romHash = await sha256Hex(file);
         appState.romHash = romHash;
 
+        log("bootRom()", {
+          romName: file.name,
+          romHash,
+          discordUserId: appState.discordUserId,
+        });
+
         let preloadBatterySaveUrl = null;
 
         if (appState.discordUserId) {
@@ -279,11 +317,13 @@
             if (latest?.found && latest?.save?.downloadUrl) {
               preloadBatterySaveUrl = latest.save.downloadUrl;
               statusEl.textContent = `Cloud battery save found for ${file.name}`;
+              log("Cloud save found", latest);
             } else {
               statusEl.textContent = `No cloud save found for ${file.name}`;
+              log("No cloud save found", latest);
             }
           } catch (err) {
-            console.error(err);
+            console.error("[emu] Cloud lookup failed", err);
             statusEl.textContent = `Cloud lookup failed for ${file.name}, booting anyway`;
           }
         } else {
@@ -313,16 +353,17 @@
 
         if (preloadBatterySaveUrl) {
           window.EJS_loadSaveFiles = [preloadBatterySaveUrl];
+          log("Configured EJS_loadSaveFiles", preloadBatterySaveUrl);
         }
 
         window.EJS_onGameStart = function () {
           appState.emulatorBooted = true;
-          console.log("EJS_onGameStart fired");
+          log("EJS_onGameStart fired");
           statusEl.textContent = `Running: ${file.name}`;
         };
 
         window.EJS_onSaveUpdate = function (saveEvent) {
-          console.log("EJS_onSaveUpdate fired", saveEvent);
+          log("EJS_onSaveUpdate fired", saveEvent);
           scheduleBatteryUpload(saveEvent);
         };
 
@@ -330,12 +371,13 @@
         script.id = "ejs-loader";
         script.src = "/emulatorjs/data/loader.js";
         script.onload = () => {
-          console.log("EmulatorJS loader loaded");
+          log("EmulatorJS loader loaded");
           if (!appState.emulatorBooted) {
             statusEl.textContent = `Booting: ${file.name}`;
           }
         };
         script.onerror = () => {
+          console.error("[emu] Failed to load local EmulatorJS assets");
           statusEl.textContent = "Failed to load local EmulatorJS assets";
         };
         document.body.appendChild(script);
@@ -346,7 +388,7 @@
         try {
           await bootRom(file);
         } catch (err) {
-          console.error(err);
+          console.error("[emu] Boot failed", err);
           statusEl.textContent = `Boot failed: ${err.message ?? err}`;
         }
       });
