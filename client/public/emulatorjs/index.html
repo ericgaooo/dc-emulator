@@ -1,397 +1,411 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>EmulatorJS GBA</title>
-    <style>
-      html, body {
-        margin: 0;
-        padding: 0;
-        width: 100%;
-        height: 100%;
-        background: #000;
-        color: white;
-        overflow: hidden;
-        font-family: system-ui, sans-serif;
-      }
 
-      #shell {
-        display: flex;
-        flex-direction: column;
-        width: 100%;
-        height: 100%;
-      }
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EmulatorJS GBA</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: #000;
+      color: white;
+      overflow: hidden;
+      font-family: system-ui, sans-serif;
+    }
 
-      #toolbar {
-        flex: 0 0 auto;
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        padding: 12px;
-        background: #111;
-        border-bottom: 1px solid #222;
-        flex-wrap: wrap;
-      }
+    #shell {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      height: 100%;
+    }
 
-      #gameWrap {
-        flex: 1 1 auto;
-        min-height: 0;
-      }
+    #toolbar {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      background: #111;
+      border-bottom: 1px solid #222;
+      flex-wrap: wrap;
+    }
 
-      #game {
-        width: 100%;
-        height: 100%;
-      }
+    #gameWrap {
+      flex: 1 1 auto;
+      min-height: 0;
+    }
 
-      .btn {
-        display: inline-block;
-        padding: 10px 14px;
-        border-radius: 10px;
-        background: #5865f2;
-        cursor: pointer;
-        font-weight: 600;
-      }
+    #game {
+      width: 100%;
+      height: 100%;
+    }
 
-      .muted {
-        color: #bbb;
-        font-size: 14px;
-      }
-    </style>
-  </head>
-  <body>
-    <div id="shell">
-      <div id="toolbar">
-        <label class="btn">
-          Choose GBA ROM
-          <input id="romInput" type="file" accept=".gba,.zip" style="display:none" />
-        </label>
-        <div id="status" class="muted">No ROM selected</div>
-        <div id="identity" class="muted">User: unknown</div>
-      </div>
-      <div id="gameWrap">
-        <div id="game"></div>
-      </div>
+    .btn {
+      display: inline-block;
+      padding: 10px 14px;
+      border-radius: 10px;
+      background: #5865f2;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .muted {
+      color: #bbb;
+      font-size: 14px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="shell">
+    <div id="toolbar">
+      <label class="btn">
+        Choose GBA ROM
+        <input id="romInput" type="file" accept=".gba,.zip" style="display:none" />
+      </label>
+      <div id="status" class="muted">No ROM selected</div>
+      <div id="identity" class="muted">User: unknown</div>
     </div>
+    <div id="gameWrap">
+      <div id="game"></div>
+    </div>
+  </div>
 
-    <script>
-      const romInput = document.getElementById("romInput");
-      const statusEl = document.getElementById("status");
-      const identityEl = document.getElementById("identity");
+  <script>
+    const romInput = document.getElementById("romInput");
+    const statusEl = document.getElementById("status");
+    const identityEl = document.getElementById("identity");
 
-      const SAVE_API_BASE = "/backend";
-      const SAVE_API_KEY = "discord-gba-dev-secret-very-long-random-string";
+    const SAVE_API_BASE = "/backend";
+    const SAVE_API_KEY = "discord-gba-dev-secret-very-long-random-string";
 
-      const appState = {
-        discordUserId: null,
-        guildId: null,
-        channelId: null,
-        instanceId: null,
-        platform: null,
-        sdkAvailable: false,
+    const appState = {
+      discordUserId: null,
+      guildId: null,
+      channelId: null,
+      instanceId: null,
+      platform: null,
+      sdkAvailable: false,
 
-        romFile: null,
-        romName: null,
-        romHash: null,
+      romFile: null,
+      romName: null,
+      romHash: null,
 
-        currentBlobUrl: null,
-        pendingBatteryUploadTimer: null,
-        emulatorBooted: false,
-      };
+      currentBlobUrl: null,
+      pendingBatteryUploadTimer: null,
+      emulatorBooted: false,
+    };
 
-      function log(label, data) {
-        console.log(`[emu] ${label}`, data ?? "");
-      }
+    function log(label, data) {
+      console.log(`[emu] ${label}`, data ?? "");
+    }
 
-      window.addEventListener("message", (event) => {
-        if (event.origin !== window.location.origin) return;
+    window.addEventListener("message", (event) => {
+      if (event.origin !== window.location.origin) return;
 
-        const msg = event.data;
-        if (!msg || typeof msg !== "object") return;
-        if (msg.type !== "DISCORD_CONTEXT") return;
+      const msg = event.data;
+      if (!msg || typeof msg !== "object") return;
+      if (msg.type !== "DISCORD_CONTEXT") return;
 
-        log("Received DISCORD_CONTEXT", msg);
+      log("Received DISCORD_CONTEXT", msg);
 
-        appState.discordUserId = msg.payload?.userId ?? null;
-        appState.guildId = msg.payload?.guildId ?? null;
-        appState.channelId = msg.payload?.channelId ?? null;
-        appState.instanceId = msg.payload?.instanceId ?? null;
-        appState.platform = msg.payload?.platform ?? null;
-        appState.sdkAvailable = !!msg.payload?.sdkAvailable;
+      appState.discordUserId = msg.payload?.userId ?? null;
+      appState.guildId = msg.payload?.guildId ?? null;
+      appState.channelId = msg.payload?.channelId ?? null;
+      appState.instanceId = msg.payload?.instanceId ?? null;
+      appState.platform = msg.payload?.platform ?? null;
+      appState.sdkAvailable = !!msg.payload?.sdkAvailable;
 
-        identityEl.textContent = `User: ${appState.discordUserId ?? "unknown"}`;
+      identityEl.textContent = `User: ${appState.discordUserId ?? "unknown"}`;
+    });
+
+    async function sha256Hex(file) {
+      const buffer = await file.arrayBuffer();
+      const digest = await crypto.subtle.digest("SHA-256", buffer);
+      return [...new Uint8Array(digest)]
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+    }
+
+    async function fetchLatestBatterySave(userId, romHash) {
+      const url = new URL(`${SAVE_API_BASE}/api/save/latest`, window.location.origin);
+      url.searchParams.set("userId", userId);
+      url.searchParams.set("romHash", romHash);
+      url.searchParams.set("saveType", "battery");
+      url.searchParams.set("slot", "0");
+
+      log("Calling fetchLatestBatterySave", {
+        url: url.toString(),
+        userId,
+        romHash,
       });
 
-      async function sha256Hex(file) {
-        const buffer = await file.arrayBuffer();
-        const digest = await crypto.subtle.digest("SHA-256", buffer);
-        return [...new Uint8Array(digest)]
-          .map((b) => b.toString(16).padStart(2, "0"))
-          .join("");
+      const res = await fetch(url.toString(), {
+        headers: {
+          "x-api-key": SAVE_API_KEY,
+        },
+      });
+
+      const text = await res.text();
+      log("fetchLatestBatterySave response", {
+        status: res.status,
+        body: text,
+      });
+
+      if (!res.ok) {
+        throw new Error(`Save lookup failed: ${res.status} ${text}`);
       }
 
-      async function fetchLatestBatterySave(userId, romHash) {
-        const url = new URL(`${SAVE_API_BASE}/api/save/latest`, window.location.origin);
-        url.searchParams.set("userId", userId);
-        url.searchParams.set("romHash", romHash);
-        url.searchParams.set("saveType", "battery");
-        url.searchParams.set("slot", "0");
+      return JSON.parse(text);
+    }
 
-        log("Calling fetchLatestBatterySave", {
-          url: url.toString(),
-          userId,
-          romHash,
-        });
+    async function uploadBatterySave({ userId, romHash, romName, arrayBuffer }) {
+      log("Uploading battery save", {
+        userId,
+        romHash,
+        romName,
+        bytes: arrayBuffer.byteLength,
+      });
 
-        const res = await fetch(url.toString(), {
-          headers: {
-            "x-api-key": SAVE_API_KEY,
-          },
-        });
-
-        const text = await res.text();
-        log("fetchLatestBatterySave response", {
-          status: res.status,
-          body: text,
-        });
-
-        if (!res.ok) {
-          throw new Error(`Save lookup failed: ${res.status} ${text}`);
-        }
-
-        return JSON.parse(text);
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = "";
+      for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
       }
+      const dataBase64 = btoa(binary);
 
-      async function uploadBatterySave({ userId, romHash, romName, arrayBuffer }) {
-        log("Uploading battery save", {
+      const res = await fetch(`${SAVE_API_BASE}/api/save`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": SAVE_API_KEY,
+        },
+        body: JSON.stringify({
           userId,
           romHash,
           romName,
-          bytes: arrayBuffer.byteLength,
-        });
-
-        const bytes = new Uint8Array(arrayBuffer);
-        let binary = "";
-        for (let i = 0; i < bytes.length; i++) {
-          binary += String.fromCharCode(bytes[i]);
-        }
-        const dataBase64 = btoa(binary);
-
-        const res = await fetch(`${SAVE_API_BASE}/api/save`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": SAVE_API_KEY,
+          saveType: "battery",
+          slot: 0,
+          dataBase64,
+          mimeType: "application/octet-stream",
+          metadata: {
+            source: "EJS_onSaveUpdate",
           },
-          body: JSON.stringify({
-            userId,
-            romHash,
-            romName,
-            saveType: "battery",
-            slot: 0,
-            dataBase64,
-            mimeType: "application/octet-stream",
-            metadata: {
-              source: "EJS_onSaveUpdate",
-            },
-          }),
+        }),
+      });
+
+      const text = await res.text();
+      log("uploadBatterySave response", {
+        status: res.status,
+        body: text,
+      });
+
+      if (!res.ok) {
+        throw new Error(`Battery upload failed: ${res.status} ${text}`);
+      }
+
+      return JSON.parse(text);
+    }
+
+    function destroyExistingEmulatorArtifacts() {
+      const oldLoader = document.getElementById("ejs-loader");
+      if (oldLoader) oldLoader.remove();
+
+      const gameEl = document.getElementById("game");
+      gameEl.innerHTML = "";
+
+      window.EJS_onSaveUpdate = undefined;
+      window.EJS_onGameStart = undefined;
+      window.EJS_loadSaveFiles = undefined;
+      window.EJS_gameUrl = undefined;
+      window.EJS_gameID = undefined;
+    }
+
+    async function extractArrayBufferFromUnknown(value) {
+      if (!value) return null;
+
+      if (value instanceof ArrayBuffer) {
+        return value;
+      }
+
+      if (value instanceof Blob) {
+        return await value.arrayBuffer();
+      }
+
+      if (ArrayBuffer.isView(value) && value.buffer instanceof ArrayBuffer) {
+        return value.buffer.slice(
+          value.byteOffset || 0,
+          (value.byteOffset || 0) + value.byteLength
+        );
+      }
+
+      return null;
+    }
+
+    function scheduleBatteryUpload(saveEvent) {
+      if (!appState.discordUserId || !appState.romHash || !appState.romName) {
+        console.warn("[emu] Skipping battery upload: missing user or ROM identity", {
+          discordUserId: appState.discordUserId,
+          romHash: appState.romHash,
+          romName: appState.romName,
         });
-
-        const text = await res.text();
-        log("uploadBatterySave response", {
-          status: res.status,
-          body: text,
-        });
-
-        if (!res.ok) {
-          throw new Error(`Battery upload failed: ${res.status} ${text}`);
-        }
-
-        return JSON.parse(text);
+        return;
       }
 
-      function destroyExistingEmulatorArtifacts() {
-        const oldLoader = document.getElementById("ejs-loader");
-        if (oldLoader) oldLoader.remove();
-
-        const gameEl = document.getElementById("game");
-        gameEl.innerHTML = "";
-
-        window.EJS_onSaveUpdate = undefined;
-        window.EJS_onGameStart = undefined;
-        window.EJS_loadSaveFiles = undefined;
-        window.EJS_gameUrl = undefined;
-        window.EJS_gameID = undefined;
+      if (appState.pendingBatteryUploadTimer) {
+        clearTimeout(appState.pendingBatteryUploadTimer);
       }
 
-      async function extractArrayBufferFromUnknown(value) {
-        if (!value) return null;
+      appState.pendingBatteryUploadTimer = setTimeout(async () => {
+        try {
+          log("Raw EmulatorJS save event", saveEvent);
 
-        if (value instanceof ArrayBuffer) {
-          return value;
-        }
+          const savePayload = saveEvent?.save ?? saveEvent;
+          const arrayBuffer = await extractArrayBufferFromUnknown(savePayload);
 
-        if (value instanceof Blob) {
-          return await value.arrayBuffer();
-        }
+          if (!arrayBuffer) {
+            console.warn("[emu] Could not extract save buffer from EmulatorJS event", saveEvent);
+            return;
+          }
 
-        if (ArrayBuffer.isView(value) && value.buffer instanceof ArrayBuffer) {
-          return value.buffer.slice(
-            value.byteOffset || 0,
-            (value.byteOffset || 0) + value.byteLength
-          );
-        }
+          statusEl.textContent = `Syncing battery save for ${appState.romName}...`;
 
-        return null;
-      }
-
-      function scheduleBatteryUpload(saveEvent) {
-        if (!appState.discordUserId || !appState.romHash || !appState.romName) {
-          console.warn("[emu] Skipping battery upload: missing user or ROM identity", {
-            discordUserId: appState.discordUserId,
+          await uploadBatterySave({
+            userId: appState.discordUserId,
             romHash: appState.romHash,
             romName: appState.romName,
+            arrayBuffer,
           });
-          return;
-        }
 
-        if (appState.pendingBatteryUploadTimer) {
-          clearTimeout(appState.pendingBatteryUploadTimer);
-        }
-
-        appState.pendingBatteryUploadTimer = setTimeout(async () => {
-          try {
-            log("Raw EmulatorJS save event", saveEvent);
-
-            const savePayload = saveEvent?.save ?? saveEvent;
-            const arrayBuffer = await extractArrayBufferFromUnknown(savePayload);
-
-            if (!arrayBuffer) {
-              console.warn("[emu] Could not extract save buffer from EmulatorJS event", saveEvent);
-              return;
-            }
-
-            statusEl.textContent = `Syncing battery save for ${appState.romName}...`;
-
-            await uploadBatterySave({
-              userId: appState.discordUserId,
-              romHash: appState.romHash,
-              romName: appState.romName,
-              arrayBuffer,
-            });
-
-            statusEl.textContent = `Running: ${appState.romName} (battery synced)`;
-          } catch (err) {
-            console.error("[emu] Battery sync failed", err);
-            statusEl.textContent = `Running: ${appState.romName} (save sync failed)`;
-          }
-        }, 2000);
-      }
-
-      async function bootRom(file) {
-        if (!file) return;
-
-        appState.romFile = file;
-        appState.romName = file.name;
-        appState.romHash = null;
-        appState.emulatorBooted = false;
-
-        statusEl.textContent = `Hashing: ${file.name}`;
-
-        const romHash = await sha256Hex(file);
-        appState.romHash = romHash;
-
-        log("bootRom()", {
-          romName: file.name,
-          romHash,
-          discordUserId: appState.discordUserId,
-        });
-
-        let preloadBatterySaveUrl = null;
-
-        if (appState.discordUserId) {
-          try {
-            statusEl.textContent = `Checking cloud save for ${file.name}...`;
-            const latest = await fetchLatestBatterySave(appState.discordUserId, romHash);
-
-            if (latest?.found && latest?.save?.downloadUrl) {
-              preloadBatterySaveUrl = latest.save.downloadUrl;
-              statusEl.textContent = `Cloud battery save found for ${file.name}`;
-              log("Cloud save found", latest);
-            } else {
-              statusEl.textContent = `No cloud save found for ${file.name}`;
-              log("No cloud save found", latest);
-            }
-          } catch (err) {
-            console.error("[emu] Cloud lookup failed", err);
-            statusEl.textContent = `Cloud lookup failed for ${file.name}, booting anyway`;
-          }
-        } else {
-          statusEl.textContent = `No Discord user detected, booting local session`;
-        }
-
-        if (appState.currentBlobUrl) {
-          URL.revokeObjectURL(appState.currentBlobUrl);
-          appState.currentBlobUrl = null;
-        }
-
-        appState.currentBlobUrl = URL.createObjectURL(file);
-
-        destroyExistingEmulatorArtifacts();
-
-        const gameEl = document.getElementById("game");
-        gameEl.innerHTML = "";
-
-        window.EJS_player = "#game";
-        window.EJS_core = "gba";
-        window.EJS_pathtodata = "/emulatorjs/data/";
-        window.EJS_gameUrl = appState.currentBlobUrl;
-        window.EJS_gameID = romHash;
-        window.EJS_threads = false;
-        window.EJS_startOnLoaded = true;
-        window.EJS_fixedSaveInterval = 7000;
-
-        if (preloadBatterySaveUrl) {
-          window.EJS_loadSaveFiles = [preloadBatterySaveUrl];
-          log("Configured EJS_loadSaveFiles", preloadBatterySaveUrl);
-        }
-
-        window.EJS_onGameStart = function () {
-          appState.emulatorBooted = true;
-          log("EJS_onGameStart fired");
-          statusEl.textContent = `Running: ${file.name}`;
-        };
-
-        window.EJS_onSaveUpdate = function (saveEvent) {
-          log("EJS_onSaveUpdate fired", saveEvent);
-          scheduleBatteryUpload(saveEvent);
-        };
-
-        const script = document.createElement("script");
-        script.id = "ejs-loader";
-        script.src = "/emulatorjs/data/loader.js";
-        script.onload = () => {
-          log("EmulatorJS loader loaded");
-          if (!appState.emulatorBooted) {
-            statusEl.textContent = `Booting: ${file.name}`;
-          }
-        };
-        script.onerror = () => {
-          console.error("[emu] Failed to load local EmulatorJS assets");
-          statusEl.textContent = "Failed to load local EmulatorJS assets";
-        };
-        document.body.appendChild(script);
-      }
-
-      romInput.addEventListener("change", async (e) => {
-        const file = e.target.files?.[0];
-        try {
-          await bootRom(file);
+          statusEl.textContent = `Running: ${appState.romName} (battery synced)`;
         } catch (err) {
-          console.error("[emu] Boot failed", err);
-          statusEl.textContent = `Boot failed: ${err.message ?? err}`;
+          console.error("[emu] Battery sync failed", err);
+          statusEl.textContent = `Running: ${appState.romName} (save sync failed)`;
         }
+      }, 2000);
+    }
+
+    async function bootRom(file) {
+      if (!file) return;
+
+      appState.romFile = file;
+      appState.romName = file.name;
+      appState.romHash = null;
+      appState.emulatorBooted = false;
+
+      statusEl.textContent = `Hashing: ${file.name}`;
+
+      const romHash = await sha256Hex(file);
+      appState.romHash = romHash;
+
+      log("bootRom()", {
+        romName: file.name,
+        romHash,
+        discordUserId: appState.discordUserId,
       });
-    </script>
-  </body>
+
+      let preloadBatterySaveUrl = null;
+
+      if (appState.discordUserId) {
+        try {
+          statusEl.textContent = `Checking cloud save for ${file.name}...`;
+          const latest = await fetchLatestBatterySave(appState.discordUserId, romHash);
+
+          if (latest?.found && latest?.save?.downloadUrl) {
+            preloadBatterySaveUrl = latest.save.downloadUrl;
+            statusEl.textContent = `Cloud battery save found for ${file.name}`;
+            log("Cloud save found", latest);
+          } else {
+            statusEl.textContent = `No cloud save found for ${file.name}`;
+            log("No cloud save found", latest);
+          }
+        } catch (err) {
+          console.error("[emu] Cloud lookup failed", err);
+          statusEl.textContent = `Cloud lookup failed for ${file.name}, booting anyway`;
+        }
+      } else {
+        statusEl.textContent = `No Discord user detected, booting local session`;
+      }
+
+      if (appState.currentBlobUrl) {
+        URL.revokeObjectURL(appState.currentBlobUrl);
+        appState.currentBlobUrl = null;
+      }
+
+      appState.currentBlobUrl = URL.createObjectURL(file);
+
+      destroyExistingEmulatorArtifacts();
+
+      const gameEl = document.getElementById("game");
+      gameEl.innerHTML = "";
+
+      window.EJS_player = "#game";
+      window.EJS_core = "gba";
+      window.EJS_pathtodata = "/emulatorjs/data/";
+      window.EJS_gameUrl = appState.currentBlobUrl;
+      window.EJS_gameID = romHash;
+      window.EJS_threads = false;
+      window.EJS_startOnLoaded = true;
+      window.EJS_fixedSaveInterval = 7000;
+
+      if (preloadBatterySaveUrl) {
+        window.EJS_loadSaveFiles = [preloadBatterySaveUrl];
+        log("Configured EJS_loadSaveFiles", preloadBatterySaveUrl);
+      }
+
+      window.EJS_onGameStart = function () {
+        appState.emulatorBooted = true;
+        console.log("[emu] EJS_onGameStart fired");
+
+        const keys = Object.keys(window).filter((k) => k.startsWith("EJS"));
+        console.log("[emu] window EJS keys", keys);
+
+        const candidates = Object.keys(window).filter(
+          (k) =>
+            /save|state|emu|retro|manager|game/i.test(k)
+        );
+        console.log("[emu] save-related window keys", candidates);
+
+        statusEl.textContent = `Running: ${file.name}`;
+      };
+
+      window.EJS_onSaveUpdate = function (saveEvent) {
+        log("EJS_onSaveUpdate fired", saveEvent);
+        scheduleBatteryUpload(saveEvent);
+      };
+
+      const script = document.createElement("script");
+      script.id = "ejs-loader";
+      script.src = "/emulatorjs/data/loader.js";
+      script.onload = () => {
+        log("EmulatorJS loader loaded");
+        if (!appState.emulatorBooted) {
+          statusEl.textContent = `Booting: ${file.name}`;
+        }
+      };
+      script.onerror = () => {
+        console.error("[emu] Failed to load local EmulatorJS assets");
+        statusEl.textContent = "Failed to load local EmulatorJS assets";
+      };
+      document.body.appendChild(script);
+    }
+
+    romInput.addEventListener("change", async (e) => {
+      const file = e.target.files?.[0];
+      try {
+        await bootRom(file);
+      } catch (err) {
+        console.error("[emu] Boot failed", err);
+        statusEl.textContent = `Boot failed: ${err.message ?? err}`;
+      }
+    });
+  </script>
+</body>
+
 </html>
