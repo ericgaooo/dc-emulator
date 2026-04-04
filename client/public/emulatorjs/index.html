@@ -98,6 +98,7 @@
         emulatorBooted: false,
 
         savePollIntervalId: null,
+        savePollStartedAt: 0,
         lastUploadedSaveHash: null,
       };
 
@@ -137,6 +138,18 @@
         return [...new Uint8Array(digest)]
           .map((b) => b.toString(16).padStart(2, "0"))
           .join("");
+      }
+
+      function isProbablyBlankSave(arrayBuffer) {
+        const bytes = new Uint8Array(arrayBuffer);
+        let ffCount = 0;
+
+        for (let i = 0; i < bytes.length; i++) {
+          if (bytes[i] === 0xff) ffCount++;
+        }
+
+        const ratio = ffCount / bytes.length;
+        return ratio > 0.98;
       }
 
       async function fetchLatestBatterySave(userId, romHash) {
@@ -238,6 +251,7 @@
         window.EJS_gameID = undefined;
 
         appState.lastUploadedSaveHash = null;
+        appState.savePollStartedAt = 0;
       }
 
       async function normalizeToArrayBuffer(value) {
@@ -300,6 +314,11 @@
             return;
           }
 
+          if (isProbablyBlankSave(arrayBuffer)) {
+            log("Skipping upload: save looks blank/uninitialized");
+            return;
+          }
+
           const saveHash = await sha256HexFromArrayBuffer(arrayBuffer);
           log("Current battery save hash", saveHash);
 
@@ -330,6 +349,7 @@
           clearInterval(appState.savePollIntervalId);
         }
 
+        appState.savePollStartedAt = Date.now();
         log("Starting manual save polling");
 
         appState.savePollIntervalId = setInterval(() => {
@@ -362,12 +382,14 @@
         if (appState.discordUserId) {
           try {
             statusEl.textContent = `Checking cloud save for ${file.name}...`;
+
             const latest = await fetchLatestBatterySave(appState.discordUserId, romHash);
 
             if (latest?.found && latest?.save?.downloadUrl) {
               preloadBatterySaveUrl = latest.save.downloadUrl;
               statusEl.textContent = `Cloud battery save found for ${file.name}`;
               log("Cloud save found", latest);
+              log("WARNING restore URL is external", preloadBatterySaveUrl);
             } else {
               statusEl.textContent = `No cloud save found for ${file.name}`;
               log("No cloud save found", latest);
