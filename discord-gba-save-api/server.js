@@ -1,15 +1,18 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
-// maybe working save load?
+
 const app = express();
 
-app.use(cors({
-  origin: true,
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "x-api-key"],
-}));
+app.use(
+  cors({
+    origin: true,
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "x-api-key"],
+  })
+);
 app.options("*", cors());
 
 app.use((req, _res, next) => {
@@ -57,15 +60,73 @@ function buildStoragePath({ userId, romHash, saveType, slot }) {
   return `${userId}/${romHash}/state/${slot}.state`;
 }
 
-function buildProxyDownloadUrl(req, { userId, romHash, saveType, slot }) {
-  const url = new URL(
-    `${req.protocol}://${req.get("host")}/api/save/file`
-  );
-  url.searchParams.set("userId", userId);
-  url.searchParams.set("romHash", romHash);
-  url.searchParams.set("saveType", saveType);
-  url.searchParams.set("slot", String(slot));
-  return url.toString();
+function getSaveFileSigningPayload({ userId, romHash, saveType, slot, exp }) {
+  return `${userId}|${romHash}|${saveType}|${slot}|${exp}`;
+}
+
+function signSaveFileUrl({ userId, romHash, saveType, slot, exp }) {
+  return crypto
+    .createHmac("sha256", API_SHARED_SECRET)
+    .update(
+      getSaveFileSigningPayload({
+        userId,
+        romHash,
+        saveType,
+        slot,
+        exp,
+      })
+    )
+    .digest("hex");
+}
+
+function verifySaveFileSignature({ userId, romHash, saveType, slot, exp, sig }) {
+  if (!sig || !exp) return false;
+
+  const now = Math.floor(Date.now() / 1000);
+  const parsedExp = Number(exp);
+
+  if (!Number.isFinite(parsedExp) || parsedExp < now) {
+    return false;
+  }
+
+  const expected = signSaveFileUrl({
+    userId,
+    romHash,
+    saveType,
+    slot,
+    exp: parsedExp,
+  });
+
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(expected, "utf8"),
+      Buffer.from(String(sig), "utf8")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function buildProxyDownloadUrl({ userId, romHash, saveType, slot }) {
+  const exp = Math.floor(Date.now() / 1000) + 60 * 10;
+  const sig = signSaveFileUrl({
+    userId,
+    romHash,
+    saveType,
+    slot,
+    exp,
+  });
+
+  const params = new URLSearchParams({
+    userId,
+    romHash,
+    saveType,
+    slot: String(slot),
+    exp: String(exp),
+    sig,
+  });
+
+  return `/backend/api/save/file?${params.toString()}`;
 }
 
 async function getSaveRecord({ userId, romHash, saveType, slot }) {
@@ -186,7 +247,7 @@ app.get("/api/save/latest", requireApiKey, async (req, res) => {
       throw signedError;
     }
 
-    const proxiedDownloadUrl = buildProxyDownloadUrl(req, {
+    const proxiedDownloadUrl = buildProxyDownloadUrl({
       userId: data.user_id,
       romHash: data.rom_hash,
       saveType: data.save_type,
@@ -221,17 +282,37 @@ app.get("/api/save/latest", requireApiKey, async (req, res) => {
   }
 });
 
-app.get("/api/save/file", requireApiKey, async (req, res) => {
+app.get("/api/save/file", async (req, res) => {
   console.log("[save/file] query", req.query);
 
   try {
-    const { userId, romHash, saveType, slot } = req.query;
+    const { userId, romHash, saveType, slot, exp, sig } = req.query;
 
     if (!userId || !romHash || !saveType) {
       return res.status(400).json({ error: "Missing required query params" });
     }
 
     const parsedSlot = Number(slot ?? 0);
+
+    const valid = verifySaveFileSignature({
+      userId,
+      romHash,
+      saveType,
+      slot: parsedSlot,
+      exp,
+      sig,
+    });
+
+    if (!valid) {
+      console.log("[save/file] invalid signature", {
+        userId,
+        romHash,
+        saveType,
+        slot: parsedSlot,
+        exp,
+      });
+      return res.status(401).json({ error: "Invalid or expired signature" });
+    }
 
     const data = await getSaveRecord({
       userId,
