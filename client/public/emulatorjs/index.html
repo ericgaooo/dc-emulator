@@ -95,15 +95,15 @@
         romHash: null,
 
         currentBlobUrl: null,
+        currentSaveBlobUrl: null,
         emulatorBooted: false,
 
         savePollIntervalId: null,
         savePollStartedAt: 0,
         lastUploadedSaveHash: null,
 
+        restoreBlobUrl: null,
         restoreFetched: false,
-        restoreFile: null,
-        restoreArrayBuffer: null,
       };
 
       function log(label, data) {
@@ -114,6 +114,16 @@
         if (appState.currentBlobUrl) {
           URL.revokeObjectURL(appState.currentBlobUrl);
           appState.currentBlobUrl = null;
+        }
+
+        if (appState.currentSaveBlobUrl) {
+          URL.revokeObjectURL(appState.currentSaveBlobUrl);
+          appState.currentSaveBlobUrl = null;
+        }
+
+        if (appState.restoreBlobUrl) {
+          URL.revokeObjectURL(appState.restoreBlobUrl);
+          appState.restoreBlobUrl = null;
         }
       }
 
@@ -194,10 +204,10 @@
         return JSON.parse(text);
       }
 
-      async function fetchRestoreSaveFile(downloadUrl, romName) {
-        log("Fetching restore save file", downloadUrl);
+      async function fetchSaveBlobUrl(relativeOrAbsoluteUrl) {
+        log("Fetching restore save file", relativeOrAbsoluteUrl);
 
-        const res = await fetch(downloadUrl);
+        const res = await fetch(relativeOrAbsoluteUrl);
         log("Restore save fetch status", res.status);
 
         if (!res.ok) {
@@ -208,25 +218,11 @@
         const arrayBuffer = await res.arrayBuffer();
         log("Restore save bytes fetched", arrayBuffer.byteLength);
 
-        const safeBaseName = (romName || "game")
-          .replace(/\.[^/.]+$/, "")
-          .replace(/[^\w.-]+/g, "_");
+        const blob = new Blob([arrayBuffer], { type: "application/octet-stream" });
+        const blobUrl = URL.createObjectURL(blob);
+        log("Created restore blob URL", blobUrl);
 
-        const fileName = `${safeBaseName}.sav`;
-        const file = new File([arrayBuffer], fileName, {
-          type: "application/octet-stream",
-        });
-
-        log("Created restore File", {
-          fileName,
-          size: file.size,
-          type: file.type,
-        });
-
-        return {
-          file,
-          arrayBuffer,
-        };
+        return blobUrl;
       }
 
       async function uploadBatterySave({ userId, romHash, romName, arrayBuffer }) {
@@ -297,8 +293,6 @@
         appState.lastUploadedSaveHash = null;
         appState.savePollStartedAt = 0;
         appState.restoreFetched = false;
-        appState.restoreFile = null;
-        appState.restoreArrayBuffer = null;
       }
 
       async function normalizeToArrayBuffer(value) {
@@ -400,6 +394,11 @@
 
       async function tryPostBootRestore() {
         try {
+          if (!appState.restoreBlobUrl) {
+            log("Post-boot restore skipped: no restore blob URL");
+            return;
+          }
+
           const emulator = window.EJS_emulator;
           const gameManager = emulator?.gameManager;
 
@@ -408,33 +407,16 @@
             return;
           }
 
-          if (!appState.restoreFile) {
-            log("Post-boot restore skipped: no restore file");
-            return;
-          }
-
           log("Attempting post-boot restore", {
             hasLoadSaveFiles: typeof gameManager.loadSaveFiles,
-            restoreFileName: appState.restoreFile.name,
-            restoreFileSize: appState.restoreFile.size,
+            restoreBlobUrl: appState.restoreBlobUrl,
           });
 
           if (typeof gameManager.loadSaveFiles === "function") {
-            const result = await gameManager.loadSaveFiles([appState.restoreFile]);
+            const result = gameManager.loadSaveFiles([appState.restoreBlobUrl]);
             log("gameManager.loadSaveFiles result", result);
           } else {
             log("Post-boot restore skipped: loadSaveFiles missing");
-          }
-
-          if (typeof gameManager.getSaveFile === "function") {
-            const loaded = gameManager.getSaveFile();
-            log("Post-boot getSaveFile() raw", loaded);
-
-            const loadedArrayBuffer = await normalizeToArrayBuffer(loaded);
-            if (loadedArrayBuffer) {
-              const loadedHash = await sha256HexFromArrayBuffer(loadedArrayBuffer);
-              log("Post-boot loaded save hash", loadedHash);
-            }
           }
         } catch (err) {
           console.error("[emu] Post-boot restore failed", err);
@@ -464,6 +446,8 @@
           discordUserId: appState.discordUserId,
         });
 
+        let preloadBatterySaveUrl = null;
+
         if (appState.discordUserId) {
           try {
             statusEl.textContent = `Checking cloud save for ${file.name}...`;
@@ -474,13 +458,8 @@
               statusEl.textContent = `Downloading cloud save for ${file.name}...`;
               log("Cloud save found", latest);
 
-              const restorePayload = await fetchRestoreSaveFile(
-                latest.save.downloadUrl,
-                file.name
-              );
-
-              appState.restoreFile = restorePayload.file;
-              appState.restoreArrayBuffer = restorePayload.arrayBuffer;
+              preloadBatterySaveUrl = await fetchSaveBlobUrl(latest.save.downloadUrl);
+              appState.restoreBlobUrl = preloadBatterySaveUrl;
               appState.restoreFetched = true;
 
               statusEl.textContent = `Cloud battery save ready for ${file.name}`;
@@ -518,6 +497,11 @@
           EJS_fixedSaveInterval: window.EJS_fixedSaveInterval,
         });
 
+        if (preloadBatterySaveUrl) {
+          window.EJS_loadSaveFiles = [preloadBatterySaveUrl];
+          log("Configured EJS_loadSaveFiles", preloadBatterySaveUrl);
+        }
+
         window.EJS_onGameStart = function () {
           appState.emulatorBooted = true;
           log("EJS_onGameStart fired");
@@ -546,7 +530,7 @@
 
           statusEl.textContent = `Running: ${file.name}`;
 
-          if (appState.restoreFile) {
+          if (appState.restoreBlobUrl) {
             setTimeout(() => {
               tryPostBootRestore();
             }, 1500);
