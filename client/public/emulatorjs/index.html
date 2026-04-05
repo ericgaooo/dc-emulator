@@ -95,15 +95,36 @@
         romHash: null,
 
         currentBlobUrl: null,
+        currentSaveBlobUrl: null,
         emulatorBooted: false,
 
         savePollIntervalId: null,
         savePollStartedAt: 0,
         lastUploadedSaveHash: null,
+
+        restoreBlobUrl: null,
+        restoreFetched: false,
       };
 
       function log(label, data) {
         console.log(`[emu] ${label}`, data ?? "");
+      }
+
+      function revokeCurrentUrls() {
+        if (appState.currentBlobUrl) {
+          URL.revokeObjectURL(appState.currentBlobUrl);
+          appState.currentBlobUrl = null;
+        }
+
+        if (appState.currentSaveBlobUrl) {
+          URL.revokeObjectURL(appState.currentSaveBlobUrl);
+          appState.currentSaveBlobUrl = null;
+        }
+
+        if (appState.restoreBlobUrl) {
+          URL.revokeObjectURL(appState.restoreBlobUrl);
+          appState.restoreBlobUrl = null;
+        }
       }
 
       window.addEventListener("message", (event) => {
@@ -148,8 +169,7 @@
           if (bytes[i] === 0xff) ffCount++;
         }
 
-        const ratio = ffCount / bytes.length;
-        return ratio > 0.98;
+        return ffCount / bytes.length > 0.98;
       }
 
       async function fetchLatestBatterySave(userId, romHash) {
@@ -182,6 +202,27 @@
         }
 
         return JSON.parse(text);
+      }
+
+      async function fetchSaveBlobUrl(relativeOrAbsoluteUrl) {
+        log("Fetching restore save file", relativeOrAbsoluteUrl);
+
+        const res = await fetch(relativeOrAbsoluteUrl);
+        log("Restore save fetch status", res.status);
+
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(`Restore file fetch failed: ${res.status} ${text}`);
+        }
+
+        const arrayBuffer = await res.arrayBuffer();
+        log("Restore save bytes fetched", arrayBuffer.byteLength);
+
+        const blob = new Blob([arrayBuffer], { type: "application/octet-stream" });
+        const blobUrl = URL.createObjectURL(blob);
+        log("Created restore blob URL", blobUrl);
+
+        return blobUrl;
       }
 
       async function uploadBatterySave({ userId, romHash, romName, arrayBuffer }) {
@@ -241,8 +282,7 @@
         const oldLoader = document.getElementById("ejs-loader");
         if (oldLoader) oldLoader.remove();
 
-        const gameEl = document.getElementById("game");
-        gameEl.innerHTML = "";
+        document.getElementById("game").innerHTML = "";
 
         window.EJS_onSaveUpdate = undefined;
         window.EJS_onGameStart = undefined;
@@ -252,18 +292,14 @@
 
         appState.lastUploadedSaveHash = null;
         appState.savePollStartedAt = 0;
+        appState.restoreFetched = false;
       }
 
       async function normalizeToArrayBuffer(value) {
         if (!value) return null;
 
-        if (value instanceof ArrayBuffer) {
-          return value;
-        }
-
-        if (value instanceof Blob) {
-          return await value.arrayBuffer();
-        }
+        if (value instanceof ArrayBuffer) return value;
+        if (value instanceof Blob) return await value.arrayBuffer();
 
         if (ArrayBuffer.isView(value) && value.buffer instanceof ArrayBuffer) {
           return value.buffer.slice(
@@ -273,8 +309,7 @@
         }
 
         if (typeof value === "string") {
-          const encoder = new TextEncoder();
-          return encoder.encode(value).buffer;
+          return new TextEncoder().encode(value).buffer;
         }
 
         return null;
@@ -357,14 +392,48 @@
         }, 8000);
       }
 
+      async function tryPostBootRestore() {
+        try {
+          if (!appState.restoreBlobUrl) {
+            log("Post-boot restore skipped: no restore blob URL");
+            return;
+          }
+
+          const emulator = window.EJS_emulator;
+          const gameManager = emulator?.gameManager;
+
+          if (!gameManager) {
+            log("Post-boot restore skipped: no gameManager");
+            return;
+          }
+
+          log("Attempting post-boot restore", {
+            hasLoadSaveFiles: typeof gameManager.loadSaveFiles,
+            restoreBlobUrl: appState.restoreBlobUrl,
+          });
+
+          if (typeof gameManager.loadSaveFiles === "function") {
+            const result = gameManager.loadSaveFiles([appState.restoreBlobUrl]);
+            log("gameManager.loadSaveFiles result", result);
+          } else {
+            log("Post-boot restore skipped: loadSaveFiles missing");
+          }
+        } catch (err) {
+          console.error("[emu] Post-boot restore failed", err);
+        }
+      }
+
       async function bootRom(file) {
         if (!file) return;
+
+        revokeCurrentUrls();
 
         appState.romFile = file;
         appState.romName = file.name;
         appState.romHash = null;
         appState.emulatorBooted = false;
         appState.lastUploadedSaveHash = null;
+        appState.restoreFetched = false;
 
         statusEl.textContent = `Hashing: ${file.name}`;
 
@@ -386,33 +455,29 @@
             const latest = await fetchLatestBatterySave(appState.discordUserId, romHash);
 
             if (latest?.found && latest?.save?.downloadUrl) {
-              preloadBatterySaveUrl = latest.save.downloadUrl;
-              statusEl.textContent = `Cloud battery save found for ${file.name}`;
+              statusEl.textContent = `Downloading cloud save for ${file.name}...`;
               log("Cloud save found", latest);
-              log("WARNING restore URL is external", preloadBatterySaveUrl);
+
+              preloadBatterySaveUrl = await fetchSaveBlobUrl(latest.save.downloadUrl);
+              appState.restoreBlobUrl = preloadBatterySaveUrl;
+              appState.restoreFetched = true;
+
+              statusEl.textContent = `Cloud battery save ready for ${file.name}`;
             } else {
               statusEl.textContent = `No cloud save found for ${file.name}`;
               log("No cloud save found", latest);
             }
           } catch (err) {
-            console.error("[emu] Cloud lookup failed", err);
-            statusEl.textContent = `Cloud lookup failed for ${file.name}, booting anyway`;
+            console.error("[emu] Cloud lookup/restore preparation failed", err);
+            statusEl.textContent = `Cloud restore prep failed for ${file.name}, booting anyway`;
           }
         } else {
           statusEl.textContent = `No Discord user detected, booting local session`;
         }
 
-        if (appState.currentBlobUrl) {
-          URL.revokeObjectURL(appState.currentBlobUrl);
-          appState.currentBlobUrl = null;
-        }
-
         appState.currentBlobUrl = URL.createObjectURL(file);
 
         destroyExistingEmulatorArtifacts();
-
-        const gameEl = document.getElementById("game");
-        gameEl.innerHTML = "";
 
         window.EJS_player = "#game";
         window.EJS_core = "gba";
@@ -464,6 +529,12 @@
           startSavePolling();
 
           statusEl.textContent = `Running: ${file.name}`;
+
+          if (appState.restoreBlobUrl) {
+            setTimeout(() => {
+              tryPostBootRestore();
+            }, 1500);
+          }
         };
 
         window.EJS_onSaveUpdate = function (saveEvent) {
